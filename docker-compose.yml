@@ -1,0 +1,12 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  meme-analysis:
+    build: .
+    volumes:
+      - ./data/raw:/app/data/raw
+      - ./data/processed:/app/data/processed
+      - ./notebooks:/app/notebooks
+    ports:
+      - "8888:8888"
