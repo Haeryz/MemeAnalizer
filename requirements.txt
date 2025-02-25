@@ -1,0 +1,13 @@
+# requirements.txt
+pandas
+numpy
+Pillow
+opencv-python
+pytesseract
+pytest
+matplotlib
+seaborn==0.12.2
+scikit-learn==1.3.0
+jupyterlab==4.0.3
+python-dotenv==1.0.0
+pyarrow>=7.0.0  # For parquet support
