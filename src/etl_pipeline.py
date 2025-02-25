@@ -82,6 +82,23 @@ def load(data, output_dir='data/processed'):
     plt.close()  # Close the figure to free memory
 
 if __name__ == '__main__':
-    image_paths, labels = extract('data/raw/images', 'data/raw/labels.csv')
+    import argparse
+    parser = argparse.ArgumentParser(description='ETL Pipeline for Image Processing')
+    parser.add_argument('--test', action='store_true', help='Run in test mode with small dataset')
+    args = parser.parse_args()
+    
+    if args.test:
+        # Use test data
+        print("Running ETL pipeline in test mode")
+        image_dir = 'data/raw_test/images'
+        labels_path = 'data/raw_test/labels_test.csv'
+        output_dir = 'data/processed_test'
+    else:
+        # Use full data
+        image_dir = 'data/raw/images'
+        labels_path = 'data/raw/labels.csv'
+        output_dir = 'data/processed'
+    
+    image_paths, labels = extract(image_dir, labels_path)
     processed_data = transform(image_paths, labels)
-    load(processed_data)
+    load(processed_data, output_dir)

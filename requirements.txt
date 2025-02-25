@@ -11,3 +11,4 @@ scikit-learn==1.3.0
 jupyterlab==4.0.3
 python-dotenv==1.0.0
 pyarrow>=7.0.0  # For parquet support
+tqdm  # For progress bars
