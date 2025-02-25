@@ -85,6 +85,7 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='ETL Pipeline for Image Processing')
     parser.add_argument('--test', action='store_true', help='Run in test mode with small dataset')
+    parser.add_argument('--sample', type=int, help='Only process specified number of images')
     args = parser.parse_args()
     
     if args.test:
@@ -100,5 +101,16 @@ if __name__ == '__main__':
         output_dir = 'data/processed'
     
     image_paths, labels = extract(image_dir, labels_path)
+    
+    # Apply sampling if requested
+    if args.sample and len(image_paths) > args.sample:
+        print(f"Sampling {args.sample} images from {len(image_paths)} total images")
+        image_paths = image_paths[:args.sample]
+        if len(labels) > args.sample:
+            labels = labels.iloc[:args.sample]
+    
+    print(f"Processing {len(image_paths)} images...")
     processed_data = transform(image_paths, labels)
+    print(f"Processed {len(processed_data)} images successfully")
     load(processed_data, output_dir)
+    print("ETL pipeline completed")
