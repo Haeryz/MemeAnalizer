@@ -6,6 +6,8 @@ from pathlib import Path
 import argparse
 import threading
 from tqdm import tqdm
+from dotenv import load_dotenv
+import pymongo
 
 def stream_output(process, description, debug=False):
     """Stream output from subprocess while keeping it separate from progress bar"""
@@ -129,14 +131,60 @@ def estimate_completion_time(file_count, avg_time_per_file=0.5):
     else:
         return f"{int(seconds)}s"
 
-def run_pipeline(process_all=False, debug=False):
+def test_mongodb_connection():
+    """Test MongoDB connection before starting the pipeline"""
+    print("\n🔌 Testing MongoDB connection...")
+    
+    # Load environment variables
+    load_dotenv()
+    connection_string = os.getenv('MONGO_CONNECTION_STRING')
+    
+    if not connection_string:
+        print("❌ MongoDB connection string not found in .env file")
+        print("Please make sure you have a .env file with MONGO_CONNECTION_STRING defined")
+        return False
+    
+    try:
+        # Try to connect to MongoDB
+        client = pymongo.MongoClient(connection_string, serverSelectionTimeoutMS=5000)
+        
+        # Force a command to check the connection
+        client.admin.command('ping')
+        
+        print("✅ Successfully connected to MongoDB")
+        client.close()
+        return True
+    except pymongo.errors.ServerSelectionTimeoutError:
+        print("❌ Could not connect to MongoDB server (timeout)")
+        print("Please check your connection string and make sure the MongoDB server is running")
+        return False
+    except pymongo.errors.ConfigurationError as e:
+        print(f"❌ MongoDB configuration error: {e}")
+        return False
+    except pymongo.errors.ConnectionFailure as e:
+        print(f"❌ MongoDB connection failure: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ MongoDB connection error: {str(e)}")
+        return False
+
+def run_pipeline(process_all=False, debug=False, load_warehouse=False):
     """Run the entire ETL pipeline, tests, and analysis with progress tracking
     
     Args:
         process_all: Whether to process 1000 images or just 10
         debug: Whether to show debug output
+        load_warehouse: Whether to load data to MongoDB data warehouse
     """
     start_time = time.time()
+    
+    # Check MongoDB connection if warehouse loading is requested
+    if load_warehouse:
+        if not test_mongodb_connection():
+            print("\n❌ Cannot continue with warehouse loading due to MongoDB connection issue.")
+            if input("Continue pipeline without warehouse loading? (y/n): ").lower() != 'y':
+                return False
+            load_warehouse = False
     
     # Ensure directories exist
     os.makedirs('data/processed', exist_ok=True)
@@ -206,6 +254,15 @@ def run_pipeline(process_all=False, debug=False):
     run_command('python -m src.analyze_data --data-path data/processed_test --output-path data/test_analysis', 
                'TEST DATA ANALYSIS', debug=debug)
     
+    # Add MongoDB warehouse loading step
+    if load_warehouse:
+        print("\n📦 Loading data to MongoDB data warehouse...")
+        if run_command('python -m src.warehouse_loader --data-path data/processed', 
+                      'MONGODB DATA WAREHOUSE LOADING', show_progress=True, debug=debug):
+            print("✅ Data successfully loaded to MongoDB data warehouse")
+        else:
+            print("❌ MongoDB data warehouse loading failed")
+    
     total_time = time.time() - start_time
     minutes, seconds = divmod(total_time, 60)
     
@@ -220,6 +277,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the ETL pipeline with options")
     parser.add_argument("--all", action="store_true", help="Process all images instead of just 10")
     parser.add_argument("--debug", action="store_true", help="Show debug output")
+    parser.add_argument("--warehouse", action="store_true", help="Load data to MongoDB data warehouse")
     args = parser.parse_args()
     
-    run_pipeline(process_all=args.all, debug=args.debug)
+    run_pipeline(process_all=args.all, debug=args.debug, load_warehouse=args.warehouse)
