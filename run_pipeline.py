@@ -7,52 +7,101 @@ import argparse
 import threading
 from tqdm import tqdm
 
-def stream_output(process, debug=False):
+def stream_output(process, description, debug=False):
     """Stream output from subprocess while keeping it separate from progress bar"""
     for line in process.stdout:
-        if debug:
-            # Print the line above the progress bar (tqdm will restore the progress bar after)
-            tqdm.write(line.strip())
+        if not line.strip():
+            continue
+            
+        # Always print processing updates (more inclusive matching)
+        if any(keyword in line for keyword in ["Processing", "Processed", "image", "images", "%"]):
+            tqdm.write(f"[{description}] {line.strip()}")
+        elif debug:
+            # Print other debug lines
+            tqdm.write(f"[{description}] {line.strip()}")
+        else:
+            # Print any other output that might be important
+            tqdm.write(f"[{description}] {line.strip()}")
 
-def run_command(command, description, show_progress=False, debug=False):
-    """Run a shell command and print output with optional progress bar"""
+def run_command(command, description, show_progress=False, debug=False, long_running=False):
+    """Run a shell command and print output with optional progress bar
+    
+    Args:
+        command: The command to run
+        description: Description of the command
+        show_progress: Whether to show a progress bar
+        debug: Whether to show debug output
+        long_running: Whether this is a long-running command (slower progress bar)
+    """
     print(f"\n{'='*80}\n{description}\n{'='*80}")
     
     if show_progress:
-        # Start the process
-        process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, 
-                                  stderr=subprocess.PIPE, text=True, 
-                                  bufsize=1, universal_newlines=True)
+        # Start the process with unbuffered output
+        process = subprocess.Popen(
+            command, 
+            shell=True, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.STDOUT,  # Redirect stderr to stdout
+            text=True,
+            bufsize=0,  # Unbuffered
+            universal_newlines=True
+        )
         
-        # Setup output streaming thread if debug is enabled
-        if debug:
-            output_thread = threading.Thread(target=stream_output, args=(process, debug))
-            output_thread.daemon = True
-            output_thread.start()
+        # Setup output streaming thread to show real progress
+        output_thread = threading.Thread(target=stream_output, args=(process, description, debug))
+        output_thread.daemon = True
+        output_thread.start()
+        
+        # Adjust timing based on expected duration
+        update_interval = 1.0 if long_running else 0.2
+        max_progress = 85 if long_running else 95  # Leave more room for completion on long-running tasks
         
         # Show progress bar
         with tqdm(total=100, desc=f"Running {description}", 
-                 bar_format='{l_bar}{bar}| {elapsed}<{remaining}', 
+                 bar_format='{l_bar}{bar}| {elapsed}<{remaining} {postfix}', 
                  position=0, leave=True) as pbar:
             
+            # Set initial postfix
+            pbar.set_postfix_str("Starting...")
+            
+            start_time = time.time()
             completed = False
+            last_progress = 0
+            
             while not completed:
                 if process.poll() is not None:  # Process has finished
                     pbar.n = 100
+                    pbar.set_postfix_str("Complete!")
                     pbar.refresh()
                     completed = True
                 else:
-                    # Update progress bar
-                    if pbar.n < 95:  # Leave room for completion
-                        pbar.update(1)
-                    time.sleep(0.2)
+                    # Calculate progress differently for long-running processes
+                    # Use elapsed time to estimate progress
+                    elapsed = time.time() - start_time
+                    
+                    if long_running:
+                        # For long-running processes, progress more slowly
+                        # Estimate based on expected duration (roughly 0.5s per image for 7000 images = ~1 hour)
+                        estimated_total = 3600  # 1 hour in seconds (adjust for your dataset)
+                        progress = min(max_progress, int((elapsed / estimated_total) * max_progress))
+                    else:
+                        # For shorter processes, progress more quickly
+                        progress = min(max_progress, int(elapsed / update_interval) + last_progress)
+                    
+                    # Only update if progress has changed
+                    if progress > pbar.n:
+                        pbar.update(progress - pbar.n)
+                        last_progress = progress
+                        
+                    # Update the postfix to show activity even when progress bar doesn't move
+                    if elapsed > 10 and long_running:
+                        minutes, seconds = divmod(elapsed, 60)
+                        pbar.set_postfix_str(f"Running for {int(minutes)}m {int(seconds)}s")
+                    
+                    time.sleep(update_interval)
             
             # Process finished, get remaining output
             stdout, stderr = process.communicate()
-            
-            if not debug:  # If we weren't already streaming output
-                if stdout:
-                    print(f"\nOutput:\n{stdout}")
             
             if stderr:
                 print(f"\nERRORS/WARNINGS:\n{stderr}")
@@ -84,7 +133,7 @@ def run_pipeline(process_all=False, debug=False):
     """Run the entire ETL pipeline, tests, and analysis with progress tracking
     
     Args:
-        process_all: Whether to process all images or just 10
+        process_all: Whether to process 1000 images or just 10
         debug: Whether to show debug output
     """
     start_time = time.time()
@@ -98,15 +147,17 @@ def run_pipeline(process_all=False, debug=False):
     image_count = 0
     try:
         if os.path.exists('data/raw/images'):
-            image_count = len(os.listdir('data/raw/images'))
+            total_images = len(os.listdir('data/raw/images'))
             
             if not process_all:
-                print(f"\n🔍 Found {image_count} images, but will only process 10 images.")
+                print(f"\n🔍 Found {total_images} images, but will only process 10 images.")
                 image_count = 10
                 est_time = estimate_completion_time(image_count)
                 print(f"Estimated processing time: {est_time}")
             else:
-                print(f"\n🔍 Processing all {image_count} images.")
+                # Cap at 1000 images
+                image_count = min(1000, total_images)
+                print(f"\n🔍 Processing {image_count} images out of {total_images} total images.")
                 est_time = estimate_completion_time(image_count)
                 print(f"Estimated processing time: {est_time}")
         else:
@@ -118,11 +169,15 @@ def run_pipeline(process_all=False, debug=False):
     print("\n🔄 Running ETL pipeline...")
     etl_command = 'python -m src.etl_pipeline'
     
-    # Add sample flag if not processing all images
+    # Add sample flag based on processing mode
     if not process_all:
         etl_command += ' --sample 10'
+        long_running = False
+    else:
+        etl_command += f' --sample {image_count}'
+        long_running = True
         
-    if run_command(etl_command, 'ETL PIPELINE EXECUTION', show_progress=True, debug=debug):
+    if run_command(etl_command, 'ETL PIPELINE EXECUTION', show_progress=True, debug=debug, long_running=long_running):
         print("✅ ETL pipeline completed successfully")
     else:
         print("❌ ETL pipeline failed")

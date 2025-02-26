@@ -6,6 +6,8 @@ import pytesseract
 from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+import sys
 
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
@@ -20,9 +22,16 @@ def extract(image_dir, labels_path):
 
 def transform(image_paths, labels):
     processed_data = []
+    total_images = len(image_paths)
     
-    for idx, path in enumerate(image_paths):
+    # Use tqdm to show real progress for each image
+    for idx, path in enumerate(tqdm(image_paths, desc="Processing images", unit="img")):
         try:
+            # Print progress for EACH image with explicit formatting for better visibility
+            progress_msg = f"Processing image {idx+1}/{total_images} ({(idx+1)/total_images*100:.1f}%)"
+            print(progress_msg, flush=True)  # Use print instead of tqdm.write with flush=True
+            sys.stdout.flush()  # Force flush stdout to ensure immediate display
+                
             # Image processing
             img = cv2.imread(path)
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -41,13 +50,19 @@ def transform(image_paths, labels):
                 **labels.iloc[idx].to_dict()
             })
             
+            # Print completion message for this image - replaced Unicode checkmark with ASCII
+            print(f"[OK] Completed image {idx+1}/{total_images}", flush=True)
+            sys.stdout.flush()
+            
         except Exception as e:
-            print(f"Error processing {path}: {str(e)}")
+            print(f"Error processing {path} ({idx+1}/{total_images}): {str(e)}", flush=True)
+            sys.stdout.flush()
     
     # Create DataFrame and clean column names
     df = pd.DataFrame(processed_data)
     # Clean column names by stripping whitespace
     df.columns = df.columns.str.strip()
+    print(f"Processed {len(processed_data)}/{total_images} images successfully", flush=True)
     return df
 
 def load(data, output_dir='data/processed'):
