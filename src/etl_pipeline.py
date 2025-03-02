@@ -61,7 +61,7 @@ def transform(image_paths, labels):
             print(f"Error processing {path} ({idx+1}/{total_images}): {str(e)}", flush=True)
             sys.stdout.flush()
     
-    # Create DataFrame and clean column names
+    # Create DataFrame and clean column namesz
     df = pd.DataFrame(processed_data)
     # Clean column names by stripping whitespace
     df.columns = df.columns.str.strip()
