@@ -1,48 +1,46 @@
 #!/bin/bash
+set -e
 
-# Print Python version
+# Print Python and Tesseract versions for debugging
+echo "Python version:"
 python --version
+echo "Tesseract version:"
+tesseract --version
 
-# Wait for MongoDB if we're using warehouse loading
+# Create necessary directories
+mkdir -p /app/data/raw /app/data/processed /app/data/analysis /app/data/raw_test
+
+# Check if MongoDB connection is configured (if warehouse flag is passed)
 if [[ "$*" == *"--warehouse"* ]]; then
-    echo "Waiting for MongoDB connection..."
-    python -c "
-import time
-import os
-from pymongo import MongoClient
-from dotenv import load_dotenv
-
-load_dotenv()
-conn_str = os.getenv('MONGO_CONNECTION_STRING')
-
-max_retries = 30
-retry_count = 0
-while retry_count < max_retries:
-    try:
-        client = MongoClient(conn_str, serverSelectionTimeoutMS=2000)
-        client.admin.command('ping')
-        print('MongoDB connection successful')
-        break
-    except Exception as e:
-        retry_count += 1
-        print(f'MongoDB connection attempt {retry_count}/{max_retries} failed: {e}')
-        if retry_count >= max_retries:
-            print('Could not connect to MongoDB after maximum retries')
-            exit(1)
-        time.sleep(2)
-"
+    echo "Checking MongoDB connection..."
+    if [ -z "${MONGO_CONNECTION_STRING}" ]; then
+        echo "WARNING: MONGO_CONNECTION_STRING environment variable not set."
+        echo "Data will not be loaded to warehouse."
+        # Remove warehouse flag from arguments
+        set -- ${@/--warehouse/}
+    else
+        echo "MongoDB connection string detected."
+        # Wait for MongoDB to be ready if using docker-compose
+        if ping -c 1 mongodb &> /dev/null; then
+            echo "Waiting for MongoDB to be ready..."
+            for i in {1..30}; do
+                if mongo --host mongodb --eval "print('connected')" &> /dev/null; then
+                    echo "MongoDB is ready!"
+                    break
+                fi
+                echo "Waiting... ($i/30)"
+                sleep 1
+            done
+        fi
+    fi
 fi
 
-# Run the pipeline with the provided arguments
-echo "Starting ETL pipeline..."
+# Run the pipeline script with the provided arguments
+echo "Starting ETL pipeline with arguments: $@"
 python run_pipeline.py "$@"
 
-exit_code=$?
-
-if [ $exit_code -eq 0 ]; then
-    echo "Pipeline completed successfully!"
-else
-    echo "Pipeline failed with exit code $exit_code"
+# Keep container running if in interactive mode
+if [ -t 0 ]; then
+    echo "Pipeline complete. Container kept alive for debugging."
+    tail -f /dev/null
 fi
-
-exit $exit_code
